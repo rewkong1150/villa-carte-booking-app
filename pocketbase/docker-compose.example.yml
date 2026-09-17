@@ -1,0 +1,32 @@
+# Deploy on the Synology NAS via Container Manager > Project > "Create" >
+# point it at this file (or paste its contents into the compose editor).
+# See ../DEPLOY.md for the full step-by-step walkthrough.
+#
+# Copy this file to docker-compose.yml and fill in your own admin
+# email/password before using it — docker-compose.yml itself is gitignored
+# since it holds the live superuser credentials.
+#
+# NOTE: all four folders below (pb_data, pb_migrations, pb_hooks, pb_public)
+# live flat, as siblings, inside the same Container Manager project folder
+# (e.g. /docker/villa-carte-booking/) — copy the contents of the repo's
+# pb_migrations/ and pb_hooks/ folders into this project folder before
+# building, or the container will fail to build with "bind source path does
+# not exist".
+services:
+  pocketbase:
+    image: ghcr.io/muchobien/pocketbase:latest
+    container_name: villa-carte-booking
+    restart: unless-stopped
+    ports:
+      - "8090:8090"
+    environment:
+      # Auto-creates/updates the PocketBase superuser on every container start
+      # (safe to restart repeatedly). CHANGE THESE to your own email/password
+      # before restarting the container, then log in with them at /_/ .
+      - PB_ADMIN_EMAIL=CHANGE_ME@example.com
+      - PB_ADMIN_PASSWORD=CHANGE_ME_use_a_real_password
+    volumes:
+      - ./pb_data:/pb_data
+      - ./pb_migrations:/pb_migrations
+      - ./pb_hooks:/pb_hooks
+      - ./pb_public:/pb_public

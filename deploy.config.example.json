@@ -1,0 +1,9 @@
+{
+  "_comment": "One-time setup. Copy this file to deploy.config.json, fill in your NAS details, then run `npm run deploy`. See DEPLOY.md for the full SSH key setup walkthrough. nasHost is the NAS's internal LAN IP (not the public DDNS hostname) -- SSH is intentionally NOT exposed to the internet, so this only works while your PC is on the office network.",
+  "nasHost": "CHANGE_ME_your_nas_lan_ip",
+  "nasPort": 22,
+  "nasUser": "CHANGE_ME_your_dsm_username",
+  "remotePath": "/volume1/docker/CHANGE_ME_project_folder",
+  "sshKeyPath": "~/.ssh/CHANGE_ME_your_deploy_key",
+  "siteUrl": "https://CHANGE_ME.example.com"
+}

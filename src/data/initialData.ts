@@ -1,0 +1,67 @@
+import { Room } from '../types';
+
+export const ADMIN_EMAIL = 'patomporn.k@villacartegroup.com';
+
+export const INITIAL_ROOMS: Room[] = [
+  {
+    id: 'room-101',
+    floor: 1,
+    name: 'ห้องประชุมใหญ่ 1 (ชั้น 1)',
+    nameEn: 'Big Meeting Room 1 (Fl. 1)',
+    capacity: 12,
+    description: 'ห้องประชุมขนาดใหญ่ชั้น 1 เหมาะสำหรับการประชุมทีม การนำเสนอ หรือการอบรม',
+    amenities: ['TV 75" 4K', 'Video Conference 4K', 'Whiteboard Glass', 'High-Speed Wi-Fi', 'HDMI & Type-C Dock'],
+    imageUrl: 'https://images.unsplash.com/photo-1497366216548-37526070297c?auto=format&fit=crop&w=800&q=80',
+    color: 'emerald',
+    resourceEmail: 'c_1881gc9i3jg4mi2mm9s06upcgkdi2@resource.calendar.google.com',
+  },
+  {
+    id: 'room-102',
+    floor: 1,
+    name: 'ห้องประชุมเล็ก 2 (ชั้น 1)',
+    nameEn: 'Small Meeting Room 2 (Fl. 1)',
+    capacity: 5,
+    description: 'ห้องประชุมย่อยชั้น 1 เหมาะสำหรับ Brainstorming งานสัมภาษณ์ หรือคุยงานกลุ่มเล็ก',
+    amenities: ['TV 55"', 'Magnetic Whiteboard', 'Video Bar', 'High-Speed Wi-Fi'],
+    imageUrl: 'https://images.unsplash.com/photo-1517502884422-41eaead166d4?auto=format&fit=crop&w=800&q=80',
+    color: 'teal',
+    resourceEmail: 'c_188bkq1p5h0dchqcigo0lon7703c6@resource.calendar.google.com',
+  },
+  {
+    id: 'room-103',
+    floor: 1,
+    name: 'Meeting 3 ติดห้องเด็ก (ชั้น 1)',
+    nameEn: 'Meeting 3 Next to Kid Room (Fl. 1)',
+    capacity: 5,
+    description: 'ห้องประชุมชั้น 1 อยู่ติดกับห้องเด็ก เหมาะสำหรับพนักงานที่พาบุตรหลานมาด้วย',
+    amenities: ['TV 55"', 'Whiteboard', 'High-Speed Wi-Fi'],
+    imageUrl: 'https://images.unsplash.com/photo-1497366811353-6870744d04b2?auto=format&fit=crop&w=800&q=80',
+    color: 'amber',
+    resourceEmail: 'c_188dfc462d36gh5ehq7pn27gop220@resource.calendar.google.com',
+  },
+  {
+    id: 'room-201',
+    floor: 2,
+    name: 'ห้องประชุมใหญ่ 1 (ชั้น 2)',
+    nameEn: 'Big Meeting Room 1 (Fl. 2)',
+    capacity: 15,
+    description: 'ห้องประชุมคณะกรรมการและผู้บริหารชั้น 2 ตกแต่งสไตล์พรีเมียม พร้อมระบบเสียงและโปรเจคเตอร์',
+    amenities: ['4K Dual Projector', 'Surround Sound System', 'Executive Conference Table', 'Catering Setup Bar', 'Wireless Mic x4'],
+    imageUrl: 'https://images.unsplash.com/photo-1431540015161-0bf868a2d407?auto=format&fit=crop&w=800&q=80',
+    color: 'indigo',
+    resourceEmail: 'c_188bulgcghoegialnvd5j9v7ae89u@resource.calendar.google.com',
+  },
+  {
+    id: 'room-202',
+    floor: 2,
+    name: 'ห้องประชุมเล็ก 2 (ชั้น 2)',
+    nameEn: 'Small Meeting Room 2 (Fl. 2)',
+    capacity: 5,
+    description: 'ห้องประชุมบรรยากาศผ่อนคลายชั้น 2 เหมาะสำหรับการระดมไอเดีย งานวางแผนยุทธศาสตร์',
+    amenities: ['TV 65" Touchscreen', 'Flipchart', 'Modular Tables', 'Coffee Machine Corner'],
+    imageUrl: 'https://images.unsplash.com/photo-1522071820081-009f0129c71c?auto=format&fit=crop&w=800&q=80',
+    color: 'sky',
+    resourceEmail: 'c_188blmpmpgu6mj75np3v7nohkspd4@resource.calendar.google.com',
+  },
+];
+

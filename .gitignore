@@ -1,0 +1,15 @@
+node_modules/
+build/
+dist/
+coverage/
+.DS_Store
+*.log
+.env*
+!.env.example
+pocketbase/pb_data/
+pocketbase/pb_public/
+pocketbase/docker-compose.yml
+!pocketbase/docker-compose.example.yml
+deploy.config.json
+!deploy.config.example.json
+.claude/

@@ -12,4 +12,3 @@ pocketbase/docker-compose.yml
 !pocketbase/docker-compose.example.yml
 deploy.config.json
 !deploy.config.example.json
-.claude/

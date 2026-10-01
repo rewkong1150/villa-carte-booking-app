@@ -52,6 +52,13 @@ export const GoogleAuthModal: React.FC<GoogleAuthModalProps> = ({
   // Google OAuth2 via PocketBase (opens a popup, handles the redirect callback itself).
   // This is the ONLY sign-in path — self-service email/password signup is disabled so
   // access is limited to whoever can authenticate with an @villacartegroup.com Google account.
+  //
+  // A urlCallback is passed so we can add access_type=offline + prompt=consent to the
+  // generated auth URL -- without those, Google never issues a refresh_token, which is
+  // what previously forced everyone to manually "reconnect" roughly every hour when the
+  // short-lived access token expired (see googleTokenRefresh.pb.js for the auto-renewal
+  // this unlocks). Providing urlCallback stops the SDK from opening its own default
+  // popup, so this has to open the (modified) popup itself.
   const handleGoogleSignIn = async () => {
     setLoading(true);
     setAuthError('');
@@ -59,10 +66,39 @@ export const GoogleAuthModal: React.FC<GoogleAuthModalProps> = ({
       const authData = await pb.collection('users').authWithOAuth2({
         provider: 'google',
         scopes: ADMIN_GOOGLE_OAUTH_SCOPES,
+        urlCallback: (url: string) => {
+          const authUrl = new URL(url);
+          authUrl.searchParams.set('access_type', 'offline');
+          authUrl.searchParams.set('prompt', 'consent');
+          const width = 500;
+          const height = 650;
+          const left = window.screenX + (window.outerWidth - width) / 2;
+          const top = window.screenY + (window.outerHeight - height) / 2;
+          window.open(
+            authUrl.toString(),
+            'google_oauth_popup',
+            `width=${width},height=${height},left=${left},top=${top}`
+          );
+        },
       });
 
       if (authData.meta?.accessToken) {
         setGoogleAccessToken(authData.meta.accessToken);
+      }
+
+      // Save the refresh token server-side so the access token can be
+      // auto-renewed later without bothering the user again. Best-effort:
+      // if this fails, the user just falls back to the old manual-reconnect
+      // behavior, same as before this existed.
+      if (authData.meta?.refreshToken) {
+        try {
+          await pb.send('/api/save-google-refresh-token', {
+            method: 'POST',
+            body: { refreshToken: authData.meta.refreshToken },
+          });
+        } catch (err) {
+          console.error('Failed to save Google refresh token:', err);
+        }
       }
 
       const email = authData.record.email || authData.meta?.email || '';

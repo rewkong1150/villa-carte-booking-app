@@ -76,6 +76,7 @@ export const BookingModal: React.FC<BookingModalProps> = ({
     DEPARTMENT_OPTIONS.includes(currentUser.department) ? currentUser.department : DEPARTMENT_OPTIONS[0]
   );
   const [guestEmails, setGuestEmails] = useState<string[]>([]);
+  const [needsItSupport, setNeedsItSupport] = useState(false);
   const [validationResult, setValidationResult] = useState<ValidationResult | null>(null);
   const [titleMissing, setTitleMissing] = useState(false);
 
@@ -101,6 +102,7 @@ export const BookingModal: React.FC<BookingModalProps> = ({
       } else {
         setGuestEmails([]);
       }
+      setNeedsItSupport(!!initialBookingToEdit.needsItSupport);
     } else if (selectedRoomId) {
       const target = rooms.find((r) => r.id === selectedRoomId);
       setRoomId(target && !isAdmin && target.floor === 1 ? getDefaultRoomId() : selectedRoomId);
@@ -186,6 +188,7 @@ export const BookingModal: React.FC<BookingModalProps> = ({
         attendeesCount,
         department,
         guestEmails: cleanGuestEmails,
+        needsItSupport,
         updatedAt: new Date().toISOString(),
         syncGoogleCalendar: true,
       });
@@ -202,6 +205,7 @@ export const BookingModal: React.FC<BookingModalProps> = ({
         endTime: endDateTime.toISOString(),
         attendeesCount,
         guestEmails: cleanGuestEmails,
+        needsItSupport,
         status: 'confirmed',
         syncGoogleCalendar: true,
       });
@@ -356,6 +360,20 @@ export const BookingModal: React.FC<BookingModalProps> = ({
                 />
               </div>
             </div>
+
+            {/* IT setup support opt-in */}
+            <label className="flex items-start gap-3 p-3.5 bg-slate-50 border border-slate-200 rounded-xl cursor-pointer hover:bg-slate-100 transition">
+              <input
+                type="checkbox"
+                checked={needsItSupport}
+                onChange={(e) => setNeedsItSupport(e.target.checked)}
+                className="mt-0.5 w-4 h-4 accent-[#1b4332] shrink-0"
+              />
+              <span>
+                <span className="block text-xs font-bold text-slate-800">{t('needsItSupportLabel')}</span>
+                <span className="block text-[11px] text-slate-500 mt-0.5">{t('needsItSupportHint')}</span>
+              </span>
+            </label>
 
             {/* Date and Time selectors */}
             <div>

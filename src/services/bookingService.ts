@@ -23,6 +23,8 @@ const toBooking = (record: RecordModel): Booking => ({
   guestEmails: record.guestEmails && record.guestEmails.length > 0 ? record.guestEmails : undefined,
   googleCalendarEventId: record.googleCalendarEventId || undefined,
   googleCalendarEventLink: record.googleCalendarEventLink || undefined,
+  needsItSupport: !!record.needsItSupport,
+  itSetupCalendarEventId: record.itSetupCalendarEventId || undefined,
   status: record.status,
   createdAt: record.created,
   updatedAt: record.updated !== record.created ? record.updated : undefined,
@@ -83,6 +85,21 @@ export const subscribeBookings = (onUpdate: (bookings: Booking[]) => void): (() 
     disposed = true;
     if (unsubscribeFn) unsubscribeFn();
   };
+};
+
+// Backs the needsItSupport calendar invite (see googleCalendarService.ts
+// createItSetupCalendarEvent) -- the client can't list `users` by isITStaff
+// itself (that collection's listRule only allows seeing your own record), so
+// this calls a small authenticated PocketBase route instead (see
+// pb_hooks/notifyItSetup.pb.js) that exposes just the email addresses.
+export const getItStaffEmails = async (): Promise<string[]> => {
+  try {
+    const res = await pb.send<{ emails: string[] }>('/api/it-staff-emails', { method: 'GET' });
+    return res.emails || [];
+  } catch (err) {
+    console.error('Failed to fetch IT staff emails:', err);
+    return [];
+  }
 };
 
 export const addBookingToStore = async (

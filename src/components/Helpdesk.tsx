@@ -2,7 +2,7 @@ import React, { useState } from 'react';
 import { Ticket, TicketStatus, User } from '../types';
 import { useLanguage } from '../context/LanguageContext';
 import { formatDateShort, formatTime } from '../utils/bookingUtils';
-import { LifeBuoy, Plus, UserCheck, CheckCircle2, Clock, AlertTriangle, Wrench } from 'lucide-react';
+import { ShieldCheck, Plus, UserCheck, CheckCircle2, Clock, AlertTriangle, Wrench, RotateCcw, Mail } from 'lucide-react';
 
 interface HelpdeskProps {
   tickets: Ticket[];
@@ -27,14 +27,35 @@ const PRIORITY_BADGE_STYLES: Record<Ticket['priority'], string> = {
   Urgent: 'bg-rose-100 text-rose-800',
 };
 
+const PRIORITY_ORDER: Record<Ticket['priority'], number> = { Urgent: 0, High: 1, Medium: 2, Low: 3 };
+
+type AssigneeFilter = 'all' | 'mine' | 'unassigned';
+
+// IT/admin-only queue -- this component is only ever mounted for
+// isITStaff/admin users (see App.tsx), so it doesn't need to guard its own
+// content by role the way the old shared component did. Deliberately
+// distinct from MyTickets.tsx (the employee-facing page): triage tools
+// (priority sort, assignee filter) that a single "my requests" list has no
+// use for, and every ticket's requester contact info surfaced up front
+// since IT needs to reach out, not just read their own submission back.
 export const Helpdesk: React.FC<HelpdeskProps> = ({ tickets, currentUser, onNewTicket, onUpdateTicket }) => {
   const { t, language } = useLanguage();
   const [activeStatus, setActiveStatus] = useState<TicketStatus>('Open');
+  const [assigneeFilter, setAssigneeFilter] = useState<AssigneeFilter>('all');
   const [notesDraft, setNotesDraft] = useState<Record<string, string>>({});
 
-  const isITStaff = !!currentUser.isITStaff || currentUser.role === 'admin';
-
-  const displayedTickets = tickets.filter((tk) => tk.status === activeStatus);
+  const statusFiltered = tickets.filter((tk) => tk.status === activeStatus);
+  const assigneeFiltered = statusFiltered.filter((tk) => {
+    if (assigneeFilter === 'mine') return tk.assignedToEmail?.toLowerCase() === currentUser.email.toLowerCase();
+    if (assigneeFilter === 'unassigned') return !tk.assignedToEmail;
+    return true;
+  });
+  // Triage order: most urgent first, then oldest-first (FIFO) within the same priority.
+  const displayedTickets = [...assigneeFiltered].sort((a, b) => {
+    const priorityDiff = PRIORITY_ORDER[a.priority] - PRIORITY_ORDER[b.priority];
+    if (priorityDiff !== 0) return priorityDiff;
+    return new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime();
+  });
 
   const handleAssignToMe = (ticket: Ticket) => {
     onUpdateTicket(ticket.id, { assignedToEmail: currentUser.email, status: 'InProgress' });
@@ -55,24 +76,37 @@ export const Helpdesk: React.FC<HelpdeskProps> = ({ tickets, currentUser, onNewT
     });
   };
 
+  const handleReopen = (ticket: Ticket) => {
+    // Clear the prior resolution cycle's leftovers too -- otherwise a
+    // reopened ticket still displays the old (now-stale) resolution notes
+    // and assignee as if the reopened issue were already handled.
+    onUpdateTicket(ticket.id, {
+      status: 'Open',
+      resolutionNotes: '',
+      resolvedAt: '',
+      assignedToEmail: '',
+      resolvedByEmail: '',
+    });
+  };
+
   return (
     <div className="space-y-6 animate-in fade-in duration-300">
-      {/* Header */}
-      <div className="bg-white rounded-3xl p-6 sm:p-8 border border-emerald-900/10 shadow-sm space-y-4">
+      {/* Header -- deliberately queue/triage-flavored, not a simple list like MyTickets.tsx */}
+      <div className="bg-[#0c2417] rounded-3xl p-6 sm:p-8 border border-emerald-900/20 shadow-sm space-y-4 text-white">
         <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
           <div className="flex items-center space-x-3">
-            <div className="p-3 bg-blue-50 text-blue-700 rounded-2xl border border-blue-200">
-              <LifeBuoy className="w-6 h-6" />
+            <div className="p-3 bg-emerald-500/15 text-emerald-300 rounded-2xl border border-emerald-400/30">
+              <ShieldCheck className="w-6 h-6" />
             </div>
             <div>
-              <h1 className="text-xl sm:text-2xl font-extrabold text-emerald-950">{t('helpdeskTitle')}</h1>
-              <p className="text-xs text-slate-500">{t('helpdeskSubtitle')}</p>
+              <h1 className="text-xl sm:text-2xl font-extrabold">{t('helpdeskTitle')}</h1>
+              <p className="text-xs text-emerald-200/60">{t('helpdeskSubtitle')}</p>
             </div>
           </div>
 
           <button
             onClick={onNewTicket}
-            className="py-2.5 px-4 bg-[#1b4332] hover:bg-[#163a28] text-white font-bold text-xs rounded-xl transition flex items-center justify-center gap-1.5 min-h-[44px]"
+            className="py-2.5 px-4 bg-emerald-500 hover:bg-emerald-400 text-[#0c2417] font-bold text-xs rounded-xl transition flex items-center justify-center gap-1.5 min-h-[44px]"
           >
             <Plus className="w-4 h-4" />
             <span>{t('newTicketBtn')}</span>
@@ -80,7 +114,7 @@ export const Helpdesk: React.FC<HelpdeskProps> = ({ tickets, currentUser, onNewT
         </div>
 
         {/* Status Sub-Tabs */}
-        <div className="flex items-center space-x-2 border-b border-slate-100 pt-2 text-xs overflow-x-auto">
+        <div className="flex items-center space-x-2 border-b border-white/10 pt-2 text-xs overflow-x-auto">
           {STATUS_TABS.map((status) => {
             const count = tickets.filter((tk) => tk.status === status).length;
             const isActive = activeStatus === status;
@@ -89,7 +123,7 @@ export const Helpdesk: React.FC<HelpdeskProps> = ({ tickets, currentUser, onNewT
                 key={status}
                 onClick={() => setActiveStatus(status)}
                 className={`px-4 py-2.5 font-bold transition border-b-2 flex items-center gap-2 whitespace-nowrap ${
-                  isActive ? 'border-[#1b4332] text-[#1b4332]' : 'border-transparent text-slate-500 hover:text-slate-900'
+                  isActive ? 'border-emerald-400 text-white' : 'border-transparent text-emerald-200/50 hover:text-white'
                 }`}
               >
                 <span>{t(`ticketStatus${status}` as any)}</span>
@@ -100,12 +134,29 @@ export const Helpdesk: React.FC<HelpdeskProps> = ({ tickets, currentUser, onNewT
             );
           })}
         </div>
+
+        {/* Assignee quick filter -- triage tool, has no equivalent on the employee-facing page */}
+        <div className="flex items-center gap-2 text-[11px]">
+          {(['all', 'mine', 'unassigned'] as AssigneeFilter[]).map((f) => (
+            <button
+              key={f}
+              onClick={() => setAssigneeFilter(f)}
+              className={`px-3 py-1.5 rounded-lg font-bold transition ${
+                assigneeFilter === f
+                  ? 'bg-emerald-500 text-white'
+                  : 'bg-white/5 text-emerald-200/70 hover:bg-white/10 hover:text-white'
+              }`}
+            >
+              {t(`ticketFilter${f === 'all' ? 'All' : f === 'mine' ? 'Mine' : 'Unassigned'}` as any)}
+            </button>
+          ))}
+        </div>
       </div>
 
       {/* Ticket List */}
       {displayedTickets.length === 0 ? (
         <div className="bg-white rounded-3xl p-12 text-center border border-slate-200/80 shadow-sm space-y-3">
-          <LifeBuoy className="w-12 h-12 text-slate-300 mx-auto" />
+          <ShieldCheck className="w-12 h-12 text-slate-300 mx-auto" />
           <h3 className="text-base font-bold text-slate-700">{t('noTicketsFound')}</h3>
         </div>
       ) : (
@@ -134,6 +185,12 @@ export const Helpdesk: React.FC<HelpdeskProps> = ({ tickets, currentUser, onNewT
                 <span>
                   {t('ticketRequestedBy')}: <strong className="text-slate-700">{tk.requesterName}</strong>
                 </span>
+                <a
+                  href={`mailto:${tk.requesterEmail}`}
+                  className="flex items-center gap-1 text-blue-700 hover:underline"
+                >
+                  <Mail className="w-3.5 h-3.5" /> {tk.requesterEmail}
+                </a>
                 <span className="flex items-center gap-1">
                   <Clock className="w-3.5 h-3.5" />
                   {formatDateShort(new Date(tk.createdAt), language)} {formatTime(new Date(tk.createdAt), language)}
@@ -160,8 +217,8 @@ export const Helpdesk: React.FC<HelpdeskProps> = ({ tickets, currentUser, onNewT
                 </div>
               )}
 
-              {/* IT staff / admin controls */}
-              {isITStaff && (tk.status === 'Open' || tk.status === 'InProgress') && (
+              {/* Triage controls */}
+              {(tk.status === 'Open' || tk.status === 'InProgress') && (
                 <div className="pt-2 border-t border-slate-100 space-y-2">
                   <textarea
                     value={notesDraft[tk.id] || ''}
@@ -198,30 +255,18 @@ export const Helpdesk: React.FC<HelpdeskProps> = ({ tickets, currentUser, onNewT
                 </div>
               )}
 
-              {/* Requester can reopen their own resolved/closed ticket */}
-              {!isITStaff &&
-                tk.requesterEmail.toLowerCase() === currentUser.email.toLowerCase() &&
-                (tk.status === 'Resolved' || tk.status === 'Closed') && (
-                  <div className="pt-2 border-t border-slate-100">
-                    <button
-                      onClick={() =>
-                        // Clear the prior resolution cycle's leftovers too -- otherwise a
-                        // reopened ticket still displays the old (now-stale) resolution
-                        // notes and assignee as if the reopened issue were already handled.
-                        onUpdateTicket(tk.id, {
-                          status: 'Open',
-                          resolutionNotes: '',
-                          resolvedAt: '',
-                          assignedToEmail: '',
-                          resolvedByEmail: '',
-                        })
-                      }
-                      className="py-2 px-3 bg-amber-50 hover:bg-amber-100 text-amber-800 border border-amber-200 font-bold text-xs rounded-xl transition"
-                    >
-                      {t('ticketReopenBtn')}
-                    </button>
-                  </div>
-                )}
+              {/* IT can also reopen a ticket themselves (e.g. closed by mistake), not just wait for the requester to */}
+              {(tk.status === 'Resolved' || tk.status === 'Closed') && (
+                <div className="pt-2 border-t border-slate-100">
+                  <button
+                    onClick={() => handleReopen(tk)}
+                    className="py-2 px-3 bg-amber-50 hover:bg-amber-100 text-amber-800 border border-amber-200 font-bold text-xs rounded-xl transition flex items-center gap-1.5"
+                  >
+                    <RotateCcw className="w-3.5 h-3.5" />
+                    {t('ticketReopenBtn')}
+                  </button>
+                </div>
+              )}
             </div>
           ))}
         </div>

@@ -13,13 +13,17 @@ import {
   addEmailNotification,
   markNotificationRead,
   deleteEmailNotification,
+  getItStaffEmails,
 } from './services/bookingService';
 import { subscribeTickets, addTicket, updateTicket } from './services/ticketService';
 import {
   createGoogleCalendarEvent,
   updateGoogleCalendarEvent,
   deleteGoogleCalendarEvent,
+  createItSetupCalendarEvent,
+  updateItSetupCalendarEvent,
   setGoogleAccessToken,
+  refreshGoogleAccessToken,
 } from './services/googleCalendarService';
 import { NAV_ITEMS, TabKey, HELPDESK_VISIBILITY } from './config/navigation';
 import { useLanguage } from './context/LanguageContext';
@@ -34,6 +38,7 @@ import { BookingModal } from './components/BookingModal';
 import { GoogleAuthModal } from './components/GoogleAuthModal';
 import { EmailDrawer } from './components/EmailDrawer';
 import { Helpdesk } from './components/Helpdesk';
+import { MyTickets } from './components/MyTickets';
 import { NewTicketModal } from './components/NewTicketModal';
 import { CheckCircle2, AlertCircle, Info, Building2, Calendar, X, Loader2 } from 'lucide-react';
 
@@ -124,6 +129,23 @@ export default function App() {
     });
     return () => unsubscribe();
     // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [currentUser?.id]);
+
+  // 2c. Proactively auto-renew the Google Calendar access token before it expires,
+  // instead of waiting for a sync call to fail and prompting the user to manually
+  // reconnect (the old behavior, roughly every ~1hr). Access tokens last ~1hr, so a
+  // 45-minute cadence leaves comfortable headroom. Only works for users who have a
+  // stored refresh token (signed in since this feature shipped -- see
+  // GoogleAuthModal.tsx); for everyone else this silently 404s and the old manual
+  // reconnect prompt remains the fallback. Runs once immediately on sign-in too, since
+  // a token can already be stale if the browser was closed and reopened later.
+  useEffect(() => {
+    if (!currentUser) return;
+    refreshGoogleAccessToken();
+    const intervalId = setInterval(() => {
+      refreshGoogleAccessToken();
+    }, 45 * 60 * 1000);
+    return () => clearInterval(intervalId);
   }, [currentUser?.id]);
 
   // 3. PocketBase's authStore is the single source of truth for who is signed in.
@@ -221,7 +243,14 @@ export default function App() {
   }, []);
 
   const isAdmin = currentUser ? currentUser.role === 'admin' : false;
-  const canSeeHelpdesk = HELPDESK_VISIBILITY === 'everyone' || isAdmin;
+  const isItStaffOrAdmin = isAdmin || !!currentUser?.isITStaff;
+  // HELPDESK_VISIBILITY gates whether REGULAR employees (the MyTickets.tsx
+  // self-service view) see the tab at all -- IT staff themselves must always
+  // be able to reach their own queue regardless of the rollout flag. Was
+  // `|| isAdmin` here, a real gap from before the IT-queue/employee-list UI
+  // split: a non-admin isITStaff user would have been locked out of their
+  // own job entirely while the flag is 'admin-only'.
+  const canSeeHelpdesk = HELPDESK_VISIBILITY === 'everyone' || isItStaffOrAdmin;
   const visibleNavItems = NAV_ITEMS.filter(
     (item) => (item.key !== 'admin' || isAdmin) && (item.key !== 'helpdesk' || canSeeHelpdesk)
   );
@@ -392,6 +421,15 @@ export default function App() {
     const { syncGoogleCalendar, ...cleanData } = bookingData;
     const targetRoom = rooms.find((r) => r.id === cleanData.roomId) || rooms[0];
 
+    // Toasts aren't a queue -- each showToast() call overwrites whatever's
+    // currently showing. Without this flag, the final "Booking created!"
+    // toast at the bottom of this function always fired last and silently
+    // clobbered any earlier no_token/auth_expired/sync-failed warning before
+    // the user had a chance to read it, even though setIsAuthModalOpen(true)
+    // was also called -- confirmed as the real cause of a user report that
+    // an expired Google connection "doesn't warn, it just lets it through."
+    let calendarIssue = false;
+
     let created: Booking;
     try {
       created = await addBookingToStore(cleanData);
@@ -422,24 +460,63 @@ export default function App() {
           console.error('Failed to persist Calendar event id, deleting orphaned event:', persistErr);
           await deleteGoogleCalendarEvent(calResult.eventId).catch(() => {});
           showToast(t('googleCalendarSyncFailedToast'), 'error');
+          calendarIssue = true;
         }
       } else if (calResult.reason === 'no_token') {
         showToast(t('googleAuthNotice'), 'info');
         setIsAuthModalOpen(true);
+        calendarIssue = true;
       } else if (calResult.reason === 'auth_expired') {
         setGoogleAccessToken(null);
         showToast(t('googleCalendarSyncExpiredToast'), 'error');
         setIsAuthModalOpen(true);
+        calendarIssue = true;
       } else {
         showToast(t('googleCalendarSyncFailedToast'), 'error');
+        calendarIssue = true;
+      }
+    }
+
+    // IT setup opt-in: the email side already went out server-side (see
+    // pb_hooks/notifyItSetup.pb.js, fires on booking create). The calendar
+    // invite has to happen here instead, since only the browser holds the
+    // booker's Google OAuth token.
+    if (created.needsItSupport) {
+      const itEmails = await getItStaffEmails();
+      if (itEmails.length > 0) {
+        const itCalResult = await createItSetupCalendarEvent(created, targetRoom, itEmails, undefined, language);
+        if (itCalResult.ok) {
+          // Persist the event id so a later cancel can find and delete it too
+          // (confirmed via a live test: without this, cancelling the booking
+          // removed the main Calendar event but left this one orphaned).
+          try {
+            await updateBookingInStore(created.id, { itSetupCalendarEventId: itCalResult.eventId });
+            created = { ...created, itSetupCalendarEventId: itCalResult.eventId };
+          } catch (persistErr) {
+            console.error('Failed to persist IT setup Calendar event id, deleting orphaned event:', persistErr);
+            await deleteGoogleCalendarEvent(itCalResult.eventId!).catch(() => {});
+          }
+          showToast(t('itSetupNotifiedToast'), 'info');
+        } else {
+          showToast(t('itSetupCalendarFailedToast'), 'error');
+          calendarIssue = true;
+        }
+      } else {
+        showToast(t('itSetupNotifiedToast'), 'info');
       }
     }
 
     await triggerEmailNotification('booking_created', created, targetRoom);
-    showToast(
-      calendarSynced ? t('bookingCreatedGCalToast') : t('bookingCreatedToast', { title: created.title }),
-      'success'
-    );
+    // Skip the generic success toast when a calendar-related warning is
+    // already showing -- otherwise this unconditionally overwrites it (see
+    // the calendarIssue comment above) and the user never sees why they
+    // need to reconnect Google.
+    if (!calendarIssue) {
+      showToast(
+        calendarSynced ? t('bookingCreatedGCalToast') : t('bookingCreatedToast', { title: created.title }),
+        'success'
+      );
+    }
   };
 
   const handleUpdateBooking = async (
@@ -467,6 +544,35 @@ export default function App() {
           calendarSyncIssue = calResult.reason;
         }
       }
+
+      // IT setup invite: the checkbox is editable on an existing booking
+      // (see BookingModal), but nothing previously kept this SECOND Calendar
+      // event in sync with edits -- confirmed as a real bug: toggling it off
+      // left a stale invite on IT's calendar, and changing the time/room
+      // while it stayed on left IT with the OLD time/room. Best-effort, like
+      // the rest of this function's Calendar calls.
+      if (merged.needsItSupport && !targetBooking.itSetupCalendarEventId) {
+        const itEmails = await getItStaffEmails();
+        if (itEmails.length > 0) {
+          const itCalResult = await createItSetupCalendarEvent(merged, targetRoom, itEmails, undefined, language);
+          if (itCalResult.ok) cleanFields.itSetupCalendarEventId = itCalResult.eventId;
+        }
+      } else if (!merged.needsItSupport && targetBooking.itSetupCalendarEventId) {
+        await deleteGoogleCalendarEvent(targetBooking.itSetupCalendarEventId).catch(() => {});
+        cleanFields.itSetupCalendarEventId = '';
+      } else if (merged.needsItSupport && targetBooking.itSetupCalendarEventId) {
+        const itEmails = await getItStaffEmails();
+        if (itEmails.length > 0) {
+          await updateItSetupCalendarEvent(
+            targetBooking.itSetupCalendarEventId,
+            merged,
+            targetRoom,
+            itEmails,
+            undefined,
+            language
+          ).catch(() => {});
+        }
+      }
     }
 
     if (calendarSyncIssue === 'auth_expired') {
@@ -486,7 +592,11 @@ export default function App() {
         const targetRoom = rooms.find((r) => r.id === (cleanFields.roomId || targetBooking.roomId)) || rooms[0];
         await triggerEmailNotification('booking_updated', { ...targetBooking, ...cleanFields } as Booking, targetRoom);
       }
-      showToast(t('bookingUpdatedToast'), 'info');
+      // Same reasoning as handleCreateBooking: don't let this unconditionally
+      // overwrite an already-showing calendar-reconnect warning.
+      if (!calendarSyncIssue) {
+        showToast(t('bookingUpdatedToast'), 'info');
+      }
     } catch (err: any) {
       await handleWriteError(err, 'bookingCreateFailedToast');
     }
@@ -495,6 +605,8 @@ export default function App() {
   const handleCancelBooking = async (bookingId: string) => {
     const target = bookings.find((b) => b.id === bookingId);
     if (!target) return;
+
+    let calendarIssue = false;
 
     if (target.googleCalendarEventId) {
       const deleteResult = await deleteGoogleCalendarEvent(target.googleCalendarEventId);
@@ -509,20 +621,45 @@ export default function App() {
         } else {
           showToast(t('googleCalendarSyncFailedToast'), 'error');
         }
+        calendarIssue = true;
       }
+    }
+
+    // Best-effort: the IT setup invite is a separate Calendar event (see
+    // handleCreateBooking) and isn't covered by the delete above.
+    if (target.itSetupCalendarEventId) {
+      await deleteGoogleCalendarEvent(target.itSetupCalendarEventId).catch(() => {});
     }
 
     try {
       await updateBookingInStore(bookingId, { status: 'cancelled' });
       const targetRoom = rooms.find((r) => r.id === target.roomId) || rooms[0];
       await triggerEmailNotification('booking_cancelled', { ...target, status: 'cancelled' }, targetRoom);
-      showToast(t('bookingCancelledToast', { title: target.title }), 'info');
+      // Same reasoning as handleCreateBooking: don't let this unconditionally
+      // overwrite an already-showing calendar-reconnect warning.
+      if (!calendarIssue) {
+        showToast(t('bookingCancelledToast', { title: target.title }), 'info');
+      }
     } catch (err: any) {
       await handleWriteError(err, 'bookingCreateFailedToast');
     }
   };
 
   const handleDeleteBooking = async (bookingId: string) => {
+    // Pre-existing gap noticed while auditing the IT-setup Calendar cleanup
+    // above: this admin hard-delete path never removed either Calendar
+    // event, so a deleted booking left BOTH the main event and (if
+    // requested) the IT-setup event stranded on Calendar forever -- worse
+    // than the cancel flow, which already handled this. Best-effort, same
+    // as everywhere else in this file.
+    const target = bookings.find((b) => b.id === bookingId);
+    if (target?.googleCalendarEventId) {
+      await deleteGoogleCalendarEvent(target.googleCalendarEventId).catch(() => {});
+    }
+    if (target?.itSetupCalendarEventId) {
+      await deleteGoogleCalendarEvent(target.itSetupCalendarEventId).catch(() => {});
+    }
+
     try {
       await deleteBookingFromStore(bookingId);
       showToast(t('bookingDeletedToast'), 'info');
@@ -779,14 +916,22 @@ export default function App() {
             />
           )}
 
-          {activeTab === 'helpdesk' && (
-            <Helpdesk
-              tickets={tickets}
-              currentUser={currentUser}
-              onNewTicket={() => setIsNewTicketModalOpen(true)}
-              onUpdateTicket={handleUpdateTicket}
-            />
-          )}
+          {activeTab === 'helpdesk' &&
+            (isItStaffOrAdmin ? (
+              <Helpdesk
+                tickets={tickets}
+                currentUser={currentUser}
+                onNewTicket={() => setIsNewTicketModalOpen(true)}
+                onUpdateTicket={handleUpdateTicket}
+              />
+            ) : (
+              <MyTickets
+                tickets={tickets}
+                currentUser={currentUser}
+                onNewTicket={() => setIsNewTicketModalOpen(true)}
+                onUpdateTicket={handleUpdateTicket}
+              />
+            ))}
 
           {activeTab === 'admin' && (
             <AdminDashboard

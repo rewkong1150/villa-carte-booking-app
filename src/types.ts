@@ -44,6 +44,15 @@ export interface Booking {
   guestEmails?: string[];
   googleCalendarEventId?: string;
   googleCalendarEventLink?: string;
+  /** Booker opted in to have IT staff set up/attend the meeting -- triggers
+   * an email to IT staff (server-side, see pb_hooks/notifyItSetup.pb.js) and
+   * a separate Google Calendar invite to them (client-side, see App.tsx). */
+  needsItSupport?: boolean;
+  /** Event id of the separate IT-setup Google Calendar invite (see
+   * googleCalendarService.ts createItSetupCalendarEvent) -- tracked so
+   * cancelling the booking can also delete this event, same as
+   * googleCalendarEventId does for the main event. */
+  itSetupCalendarEventId?: string;
   status: 'confirmed' | 'cancelled';
   createdAt: string; // ISO String
   updatedAt?: string;

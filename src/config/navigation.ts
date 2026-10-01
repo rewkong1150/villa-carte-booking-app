@@ -3,10 +3,11 @@ import type { ComponentType } from 'react';
 
 export type TabKey = 'rooms' | 'schedule' | 'my-bookings' | 'helpdesk' | 'admin';
 
-// Rollout flag: IT Helpdesk is built and deployed but not yet announced to
-// staff. 'admin-only' limits the tab to admins for internal testing (e.g.
-// setting the first isITStaff flags); 'everyone' reveals it to all staff --
-// no other code change needed to flip this. (Requested 2026-08-25.)
+// Rollout flag: IT Helpdesk was built 2026-08-25, briefly opened to
+// 'everyone' 2026-09-26, then pulled back to 'admin-only' 2026-09-29 pending
+// a full bug audit of the booking/calendar-sync/helpdesk changes made this
+// week -- not a rollback of any specific found bug, just caution before a
+// wider audience sees it again.
 export const HELPDESK_VISIBILITY: 'admin-only' | 'everyone' = 'admin-only';
 
 export interface NavItem {

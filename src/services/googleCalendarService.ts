@@ -2,6 +2,7 @@ import { Booking, Room } from '../types';
 import { translations, Language } from '../context/LanguageContext';
 import { getRoomName } from '../utils/bookingUtils';
 import { getDepartmentLabel } from '../data/departments';
+import { pb } from '../pocketbase/config';
 
 const floorLabel = (lang: Language, floor: number) => translations[lang].floorBadge.replace('{floor}', String(floor));
 
@@ -28,6 +29,31 @@ export const setGoogleAccessToken = (token: string | null) => {
 export const getGoogleAccessToken = (): string | null => {
   return cachedAccessToken;
 };
+
+/**
+ * Asks the server to mint a fresh Google access token from the user's stored
+ * refresh token (see pb_hooks/googleTokenRefresh.pb.js) instead of making
+ * them manually reconnect. Only works for users who have signed in at least
+ * once since the refresh-token flow was added (GoogleAuthModal.tsx requests
+ * offline access and saves the refresh token right after sign-in) -- for
+ * anyone else this 404s and the caller falls back to the manual reconnect
+ * prompt, same as before this existed.
+ */
+export async function refreshGoogleAccessToken(): Promise<string | null> {
+  try {
+    const res = await pb.send<{ accessToken: string; expiresIn: number }>('/api/refresh-google-token', {
+      method: 'GET',
+    });
+    if (res?.accessToken) {
+      setGoogleAccessToken(res.accessToken);
+      return res.accessToken;
+    }
+    return null;
+  } catch (err) {
+    console.error('Failed to auto-refresh Google access token:', err);
+    return null;
+  }
+}
 
 /**
  * Google access tokens expire after ~1 hour and this app has no refresh-token
@@ -287,6 +313,120 @@ export async function deleteGoogleCalendarEvent(
     return { ok: false, reason: 'other' };
   } catch (err) {
     console.error('Failed to delete Google Calendar event:', err);
+    return { ok: false, reason: 'other' };
+  }
+}
+
+/**
+ * Creates a separate Google Calendar entry inviting IT staff to come set up
+ * or attend a meeting the booker opted into (needsItSupport). This has to
+ * run in the browser using the BOOKER's own OAuth token -- there is no
+ * server-side Google credential in this app, and IT staff's own tokens
+ * aren't available here either. The recipient list itself comes from a
+ * small authenticated PocketBase route (see pb_hooks/notifyItSetup.pb.js)
+ * since the client can't otherwise see who is IT staff.
+ */
+export async function createItSetupCalendarEvent(
+  booking: Booking,
+  room: Room,
+  itStaffEmails: string[],
+  accessTokenOverride?: string,
+  lang: Language = 'th'
+): Promise<CalendarSyncResult> {
+  const token = accessTokenOverride || cachedAccessToken;
+  if (!token) return { ok: false, reason: 'no_token' };
+  if (itStaffEmails.length === 0) return { ok: false, reason: 'other' };
+
+  const tr = translations[lang];
+  const roomName = getRoomName(room, lang);
+
+  const payload = {
+    summary: `[${tr.itSetupSummaryPrefix}] ${booking.title} (${roomName})`,
+    location: `${roomName}, ${floorLabel(lang, room.floor)}, Villa Carte Group HQ`,
+    description: `${tr.itSetupSummaryPrefix}\n${tr.emailLabelTopic}: ${booking.title}\n${tr.emailLabelRoom}: ${roomName}\n${tr.emailLabelBooker}: ${booking.userName} (${booking.userEmail})`,
+    start: { dateTime: new Date(booking.startTime).toISOString(), timeZone: 'Asia/Bangkok' },
+    end: { dateTime: new Date(booking.endTime).toISOString(), timeZone: 'Asia/Bangkok' },
+    attendees: itStaffEmails.map((email) => ({ email })),
+    reminders: {
+      useDefault: false,
+      overrides: [{ method: 'popup', minutes: 15 }],
+    },
+  };
+
+  try {
+    const res = await fetch('https://www.googleapis.com/calendar/v3/calendars/primary/events?sendUpdates=all', {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${token}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify(payload),
+    });
+
+    if (!res.ok) {
+      const errJson = await res.json().catch(() => ({}));
+      console.error('Failed to create IT setup Calendar event:', errJson);
+      if (res.status === 401 || res.status === 403) return { ok: false, reason: 'auth_expired' };
+      return { ok: false, reason: 'other' };
+    }
+
+    const data = await res.json();
+    return { ok: true, eventId: data.id, htmlLink: data.htmlLink };
+  } catch (err) {
+    console.error('IT setup Calendar event creation failed:', err);
+    return { ok: false, reason: 'other' };
+  }
+}
+
+/**
+ * Updates an existing IT-setup Calendar event (see createItSetupCalendarEvent)
+ * -- needed so editing a booking's time/room after IT support was already
+ * requested doesn't leave IT staff with a stale invite pointing at the old
+ * time/room. Confirmed as a real gap: the checkbox is editable on an existing
+ * booking, but nothing kept this second event in sync with edits.
+ */
+export async function updateItSetupCalendarEvent(
+  eventId: string,
+  booking: Booking,
+  room: Room,
+  itStaffEmails: string[],
+  accessTokenOverride?: string,
+  lang: Language = 'th'
+): Promise<CalendarUpdateResult> {
+  const token = accessTokenOverride || cachedAccessToken;
+  if (!token || !eventId) return { ok: false, reason: 'no_token' };
+
+  const tr = translations[lang];
+  const roomName = getRoomName(room, lang);
+
+  const payload = {
+    summary: `[${tr.itSetupSummaryPrefix}] ${booking.title} (${roomName})`,
+    location: `${roomName}, ${floorLabel(lang, room.floor)}, Villa Carte Group HQ`,
+    description: `${tr.itSetupSummaryPrefix}\n${tr.emailLabelTopic}: ${booking.title}\n${tr.emailLabelRoom}: ${roomName}\n${tr.emailLabelBooker}: ${booking.userName} (${booking.userEmail})`,
+    start: { dateTime: new Date(booking.startTime).toISOString(), timeZone: 'Asia/Bangkok' },
+    end: { dateTime: new Date(booking.endTime).toISOString(), timeZone: 'Asia/Bangkok' },
+    attendees: itStaffEmails.map((email) => ({ email })),
+  };
+
+  try {
+    const res = await fetch(`https://www.googleapis.com/calendar/v3/calendars/primary/events/${eventId}?sendUpdates=all`, {
+      method: 'PATCH',
+      headers: {
+        Authorization: `Bearer ${token}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify(payload),
+    });
+
+    if (!res.ok) {
+      const errJson = await res.json().catch(() => ({}));
+      console.error('Failed to update IT setup Calendar event:', errJson);
+      if (res.status === 401 || res.status === 403) return { ok: false, reason: 'auth_expired' };
+      return { ok: false, reason: 'other' };
+    }
+    return { ok: true };
+  } catch (err) {
+    console.error('Failed to update IT setup Calendar event:', err);
     return { ok: false, reason: 'other' };
   }
 }
